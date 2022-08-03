@@ -6,6 +6,7 @@ import os
 import torch
 import numpy as np
 import posenet
+import webcam_demo
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=int, default=101)
@@ -20,28 +21,56 @@ def main():
     model = model.cuda()
     output_stride = model.output_stride
 
-    if args.output_dir:
-        if not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir)
-    
-    filenames = [
-            f.path for f in os.scandir(args.image_dir) if f.is_file() and f.path.endswith(('.png', '.jpg'))]
-    
-
     photo = input("enter 1 to input image or 2 for webcam")
     # filenames = []
     if photo == 1:
         #take in image(s?)
+        if args.output_dir:
+            if not os.path.exists(args.output_dir):
+                os.makedirs(args.output_dir)
         filenames = [
             f.path for f in os.scandir(args.image_dir) if f.is_file() and f.path.endswith(('.png', '.jpg'))]
         input_image, draw_image, output_scale = posenet.read_imgfile(
             f, scale_factor=args.scale_factor, output_stride=output_stride)
+        
+        for f in filenames:
+            input_image, draw_image, output_scale = posenet.read_imgfile(
+                f, scale_factor=args.scale_factor, output_stride=output_stride)
+
+            with torch.no_grad():
+                input_image = torch.Tensor(input_image).cuda()
+
+                heatmaps_result, offsets_result, displacement_fwd_result, displacement_bwd_result = model(input_image)
+
+                pose_scores, keypoint_scores, keypoint_coords = posenet.decode_multiple_poses(
+                    heatmaps_result.squeeze(0),
+                    offsets_result.squeeze(0),
+                    displacement_fwd_result.squeeze(0),
+                    displacement_bwd_result.squeeze(0),
+                    output_stride=output_stride,
+                    max_pose_detections=10,
+                    min_pose_score=0.25)
+
+            keypoint_coords *= output_scale
+            
+            print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
+        
     if photo == 2:
         #take photo with webcam and store image
-        print("tbd")
+        print("hi")
+        while True:
+            keypoint_coords, keypoint_scores = webcam()
+            print("hi")
+            print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
+            if calculate_if_slouching(keypoint_coords, keypoint_scores) is False:
+                print("not slouching anymore")
+                break
+
+
 
     
-    
+    #we moved this chunk to if photo ==1
+    """
     for f in filenames:
         input_image, draw_image, output_scale = posenet.read_imgfile(
             f, scale_factor=args.scale_factor, output_stride=output_stride)
@@ -64,46 +93,14 @@ def main():
         
         print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
         
-        # print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
-
         """
-        if args.output_dir:
-            draw_image = posenet.draw_skel_and_kp(
-                draw_image, pose_scores, keypoint_scores, keypoint_coords,
-                min_pose_score=0, min_part_score=0.25)
-
-            cv2.imwrite(os.path.join(args.output_dir, os.path.relpath(f, args.image_dir)), draw_image)
-
-        if not args.notxt:
-            print()
-            print("Results for image: %s" % f)
-            for pi in range(len(pose_scores)):
-                if pose_scores[pi] == 0.:
-                    break
-                print('Pose #%d, score = %f' % (pi, pose_scores[pi]))
-                for ki, (s, c) in enumerate(zip(keypoint_scores[pi, :], keypoint_coords[pi, :, :])):
-                    print('Keypoint %s, score = %f, coord = %s' % (posenet.PART_NAMES[ki], s, c))
-        """
-
-   ## print('Average FPS:', len(filenames) / (time.time() - start))
-
     
 
 
-def calculate_if_slouching(keypoint_coords, keypoint_scores):
-
-    
+def calculate_if_slouching(keypoint_coords, keypoint_scores):    
     """
-    take in the positional coordinates we need
-    calculate angle
-    assuming its waist and up, you would take left shoulder, left ear coordinates?
-        calculate horizontal distance as difference between x coord of left shoulder and ear
-        vertical distance is difference between their y coordinates
-        take absolute value of vertical and horizontal distances
-        arctan(vertical/horizontal distance) to find angle
-    find what the angle is when youre not slouching
-    if calculated angle is greater than not slouching angle, return True because slouching
-    else False    
+    calculates angle
+       
     """
     higher = 0.35 #TBD
     lower = 0.05
@@ -111,9 +108,7 @@ def calculate_if_slouching(keypoint_coords, keypoint_scores):
     keypoint_coords = keypoint_coords[0][:7][:] #error likely !!!!!!!!!!!!
     
     keypoint_scores = keypoint_scores[0][:7]
-    
-
-    
+        
     head_sum = [0.0, 0.0]
     count = 1e-14
 
@@ -180,6 +175,50 @@ def calculate_if_slouching(keypoint_coords, keypoint_scores):
         else:
             return False """""
     
+def webcam():
+    cap = cv2.VideoCapture(args.cam_id)
+    cap.set(3, args.cam_width)
+    cap.set(4, args.cam_height)
+
+    start = time.time()
+    frame_count = 0
+    while True:
+        input_image, display_image, output_scale = posenet.read_cap(
+            cap, scale_factor=args.scale_factor, output_stride=output_stride)
+
+        with torch.no_grad():
+            input_image = torch.Tensor(input_image).cuda()
+
+            heatmaps_result, offsets_result, displacement_fwd_result, displacement_bwd_result = model(input_image)
+
+            pose_scores, keypoint_scores, keypoint_coords = posenet.decode_multiple_poses(
+                heatmaps_result.squeeze(0),
+                offsets_result.squeeze(0),
+                displacement_fwd_result.squeeze(0),
+                displacement_bwd_result.squeeze(0),
+                output_stride=output_stride,
+                max_pose_detections=10,
+                min_pose_score=0.15)
+
+        keypoint_coords *= output_scale         
+
+        print("\n")
+        print(keypoint_coords)
+
+        # TODO this isn't particularly fast, use GL for drawing and display someday...
+        overlay_image = posenet.draw_skel_and_kp(
+            display_image, pose_scores, keypoint_scores, keypoint_coords,
+            min_pose_score=0.15, min_part_score=0.1)
+
+        cv2.imshow('posenet', overlay_image)
+        frame_count += 1
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        
+        print('Average FPS: ', frame_count / (time.time() - start))
+
+        return keypoint_coords, keypoint_scores
+
     
 
 
