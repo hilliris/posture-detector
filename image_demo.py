@@ -47,6 +47,8 @@ def main():
                 max_pose_detections=10,
                 min_pose_score=0.25)
 
+        
+
         keypoint_coords *= output_scale
 
         if args.output_dir:
