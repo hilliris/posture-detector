@@ -1,5 +1,4 @@
 # we actually do the work here >:)
-# we actually do the work here >:)
 import cv2
 import time
 import argparse
@@ -62,8 +61,9 @@ def main():
                 min_pose_score=0.25)
 
         keypoint_coords *= output_scale
-
-        return keypoint_coords, keypoint_scores
+        
+        print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
+        
         # print("slouching?: ", calculate_if_slouching(keypoint_coords, keypoint_scores))
 
         """
@@ -92,9 +92,7 @@ def main():
 
 def calculate_if_slouching(keypoint_coords, keypoint_scores):
 
-    print("shape of key_coords: ", keypoint_coords.shape)
-    print("shape of key_scores: ", keypoint_scores.shape)
-
+    
     """
     take in the positional coordinates we need
     calculate angle
@@ -108,57 +106,57 @@ def calculate_if_slouching(keypoint_coords, keypoint_scores):
     else False    
     """
     higher = 0.35 #TBD
-    lower = 0.15
+    lower = 0.05
+
+    keypoint_coords = keypoint_coords[0][:7][:] #error likely !!!!!!!!!!!!
+    
+    keypoint_scores = keypoint_scores[0][:7]
     
 
-    keypoint_coords = keypoint_coords[:][:7][:] #error likely !!!!!!!!!!!!
-    keypoint_scores = keypoint_scores[:][:7]
-
-    print("shape of key_coords: ", keypoint_coords.shape)
-    print("shape of key_scores: ", keypoint_scores.shape)
     
-    for image in range(1, len(keypoint_coords)):
+    head_sum = [0.0, 0.0]
+    count = 1e-14
+
+    for point in (range(3, 5)): 
+        if keypoint_scores[point] > 0.01:
+            print("added head point")  
+            head_sum += keypoint_coords[point] # :)
+            count += 1
+
+
+    shd_sum = [0.0, 0.0]
+    count2 = 1e-14
+
+    for point in range(2): 
+        if keypoint_scores[point + 5] > 0.01:
+            print("added shoulder point")
+            shd_sum += keypoint_coords[point + 5]
+            count2 += 1
         
-        head_sum = [0.0, 0.0]
-        count = 1e-14
+    
 
-        print(keypoint_scores[image])
+    head_avg = np.divide(head_sum, count)
+    
 
-        for point in range(5):
-            if keypoint_scores[image][point] > 0.01:
-                head_sum += keypoint_coords[image][point]
-                count += 1
+    shd_avg = np.divide(shd_sum, count2)
+   
         
-        shd_sum = [0.0, 0.0]
-        count2 = 1e-14
-
-        for point in range(2):
-            if keypoint_scores[image][point + 5] > 0.01:
-                shd_sum += keypoint_coords[image][point + 5]
-                count2 += 1
+    x_distance = abs(head_avg[0] - shd_avg[0])
+    
         
-        print("count2", count2)
+    y_distance = abs(head_avg[1] - shd_avg[1])
+    
 
-        head_avg = np.divide(head_sum, count)
-        print("head_avg", head_avg)
-
-        shd_avg = np.divide(shd_sum, count2)
-        print("shd_avg", shd_avg)
+    angle = np.arctan(y_distance/x_distance)
+    print("angle", angle)
+    
         
-        x_distance = abs(head_avg[0] - shd_avg[0])
-        print("x_distance", x_distance)
-        
-        y_distance = abs(head_avg[1] - shd_avg[1])
-        print("y_distance", y_distance)
-
-        angle = np.arctan(y_distance/x_distance)
-        print("angle", angle)
+    if angle < higher and angle > lower: #check if slouching
+        print("good posture :)")
         print("\n")
-        
-        if angle < higher and angle > lower: #check if slouching
-            print("good posture :)")
-        else: 
-            print("L posture >:(")
+    else: 
+        print("L posture >:(")
+        print("\n")
     
     
     
@@ -186,5 +184,4 @@ def calculate_if_slouching(keypoint_coords, keypoint_scores):
 
 
 if __name__ == "__main__":
-    keyC, keyS = main()
-    print("slouching?: ", calculate_if_slouching(keyC, keyS))
+    main()
